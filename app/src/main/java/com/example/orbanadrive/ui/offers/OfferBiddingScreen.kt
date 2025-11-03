@@ -38,21 +38,7 @@ fun OfferBidScreen(
         loading = true; error = null
         runCatching { repo.getOffer(offerId) }
             .onSuccess { d ->
-                ui = d
 
-                // Reglas:
-                // - Directa => NO bidding
-                // - Canal pasajero (app_passenger) + allow_bidding => SÍ bidding
-                val fromPassenger = d.requested_channel?.equals("app_passenger", ignoreCase = true) == true
-                biddingOn = (d.is_direct != 1) && fromPassenger && (d.allow_bidding == true)
-
-                val q = d.quoted_amount ?: 80.0
-                // Rango cliente (estilo inDriver aproximado)
-                bidMin = max(20.0, q * 0.6)
-                bidMax = max(bidMin + 5.0, q * 1.6)
-
-                val seed = (d.driver_offer ?: d.passenger_offer ?: d.quoted_amount ?: 80.0)
-                bidValue = seed.coerceIn(bidMin, bidMax)
             }
             .onFailure { error = it.message }
         loading = false

@@ -4,62 +4,94 @@ import retrofit2.http.*
 
 interface DriverApi {
 
-    // === Ofertas ===
-    @GET("driver/offers")
-    suspend fun listOffers(@Query("status") status: String? = null): OffersRes
+    // Vehículos
+    @GET("/api/driver/vehicles")
+    suspend fun vehicles(): VehiclesRes
 
-    @GET("driver/offers/{id}")
-    suspend fun getOffer(@Path("id") offerId: Long): OfferDetails
+    // Turnos
+    @POST("/api/driver/shifts/start")
+    suspend fun startShift(@Body body: ShiftStartReq): StartShiftRes
 
-    @POST("driver/offers/{id}/accept")
+    @POST("/api/driver/shifts/finish")
+    suspend fun finishShift(@Body body: ShiftFinishReq? = null): OkRes
+
+    data class ShiftStartReq(val vehicle_id: Long?)
+    data class StartShiftRes(val ok: Boolean, val shift_id: Long)
+    data class ShiftFinishReq(val shift_id: Long?)
+
+    // Ubicación / busy
+    @POST("/api/driver/location")
+    suspend fun updateLocation(@Body body: LocationReq): OkRes
+
+    @POST("/api/driver/location")
+    suspend fun postLocation(@Body body: Map<String, @JvmSuppressWildcards Any?>): OkRes
+
+    data class LocationReq(
+        val lat: Double,
+        val lng: Double,
+        val busy: Boolean? = null,
+        val speed_kmh: Double? = null
+    )
+
+    // Ofertas
+    @GET("/api/driver/offers")
+    suspend fun listOffers(@Query("status") status: String? = null): OfferListRes
+
+    // IMPORTANTE: esta ruta debe existir así en backend (ver fixes más abajo)
+    @GET("/api/driver/offers/{offer}")
+    suspend fun getOffer(@Path("offer") offerId: Long): OfferShowRes
+
+    @POST("/api/driver/offers/{offer}/accept")
     suspend fun acceptOffer(
-        @Path("id") offerId: Long,
+        @Path("offer") offerId: Long,
         @Body body: Map<String, @JvmSuppressWildcards Any?>
     ): AcceptRes
 
-    @POST("driver/offers/{id}/reject")
-    suspend fun rejectOffer(@Path("id") offerId: Long): OkRes
+    @POST("/api/driver/offers/{offer}/reject")
+    suspend fun rejectOffer(@Path("offer") offerId: Long): OkRes
 
-    // === Cola ===
-    @GET("driver/queue")
-    suspend fun queue(): List<QueueItem>
-
-    @POST("driver/queue/promote")
-    suspend fun queuePromote(
-        @Body body: Map<String, @JvmSuppressWildcards Any?>
-    ): PromoteRes
-
-    @DELETE("driver/queue/{offerId}")
-    suspend fun queueDrop(@Path("offerId") offerId: Long): OkRes
-
-    @POST("driver/queue/clear")
-    suspend fun queueClear(): OkRes
-
-    // === Ride activo / finish ===
-    @GET("driver/ride/active")
+    // Ride activo / finish / cancelar / stop
+    @GET("/api/driver/rides/active")
     suspend fun activeRide(): ActiveRideRes
 
-    @POST("driver/rides/{id}/finish")
-    suspend fun finishRide(@Path("id") rideId: Long): FinishRes
+    @POST("/api/driver/rides/{ride}/finish")
+    suspend fun finishRide(@Path("ride") rideId: Long): OkRes
 
-    // === Vehículos / Turno ===
-    @GET("driver/vehicles")
-    suspend fun vehicles(): VehiclesRes
+    @POST("/api/driver/rides/{ride}/cancel")
+    suspend fun cancelRide(@Path("ride") rideId: Long, @Body body: CancelReq): OkRes
+    data class CancelReq(val reason: String?)
 
-    @POST("driver/shifts/start")
-    suspend fun startShift(@Body req: ShiftStartReq): ShiftStartRes
+    @POST("/api/driver/rides/{ride}/complete-stop")
+    suspend fun completeStop(@Path("ride") rideId: Long): CompleteStopRes
 
-    // === Ubicación / busy ===
-    @POST("driver/location")
-    suspend fun updateLocation(@Body req: LocationReq): OkRes
+    // Cola
+    @GET("/api/driver/queue")
+    suspend fun queue(): List<QueueItem>
 
-    // Variante genérica que usas en setBusy()
-    @POST("driver/location")
-    suspend fun postLocation(
-        @Body body: Map<String, @JvmSuppressWildcards Any?>
-    ): OkRes
+    @POST("/api/driver/queue/promote")
+    suspend fun queuePromote(@Body body: Map<String, @JvmSuppressWildcards Any?>): OkRes
 
-    // === Settings dispatch ===
-    @GET("driver/dispatch/settings")
+    @DELETE("/api/driver/queue/{offer}")
+    suspend fun queueDrop(@Path("offer") offerId: Long): OkRes
+
+    @DELETE("/api/driver/queue")
+    suspend fun queueClear(): OkRes
+
+    // Route (driver scope)
+    @POST("/api/driver/geo/route")
+    suspend fun geoRoute(@Body body: RouteReq): RouteRes
+    data class RouteReq(
+        val from: LatLng,
+        val to: LatLng,
+        val mode: String = "driving"
+    )
+    data class LatLng(val lat: Double, val lng: Double)
+
+    // Settings
+    @GET("/api/dispatch/settings")
     suspend fun dispatchSettings(): DispatchSettingsRes
+
+    // Cancel reasons (si la tienes)
+    @GET("/api/driver/cancel-reasons")
+    suspend fun cancelReasons(): CancelReasonsRes
 }

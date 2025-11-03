@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,129 +43,91 @@ fun VehicleSelectScreen(nav: NavHostController) {
     var loading by remember { mutableStateOf(true) }
     var error   by remember { mutableStateOf<String?>(null) }
 
-    // Datos del driver
     var me          by remember { mutableStateOf<MeRes?>(null) }
     var driverName  by remember { mutableStateOf<String?>(null) }
     var driverPhone by remember { mutableStateOf<String?>(null) }
     var shiftOpen   by remember { mutableStateOf(false) }
 
-    // Vehículos
     var vehicles   by remember { mutableStateOf<List<VehicleItem>>(emptyList()) }
-    var selectedId by remember { mutableStateOf<Long?>(null) }
+    var selectedId: Int? by rememberSaveable { mutableStateOf<Int?>(null) }
 
-    // ===== Helpers permisos =====
-    // ----- helpers de permisos -----
     fun hasLocPermission(): Boolean {
         val fine = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarse = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         return fine || coarse
     }
 
-    // ===== Helpers permisos =====
-
-    // ----- PRIMERO declara la función -----
     suspend fun startShiftAndGo() {
         try {
             loading = true
-            val vid = selectedId
-            if (vid == null) {
+            val vid = selectedId ?: run {
                 error = "Selecciona un vehículo."
-                Log.e("Orbana.Vehicle", "startShiftAndGo() sin vehículo seleccionado")
                 return
             }
-            Log.d("Orbana.Vehicle", "startShift() → vehicleId=$vid")
-            val shiftId = app.driverRepo.startShift(vid)
-            Log.d("Orbana.Vehicle", "startShift() OK shiftId=$shiftId")
-
+            val shiftId = app.driverRepo.startShift(vid.toLong())
             if (shiftId != null) {
                 val token  = app.tokenStore.getToken()
                 val tenant = app.tokenStore.getTenantId()?.toLongOrNull()
-                Log.d("Orbana.Vehicle", "LocationService.start(tokenNull=${token.isNullOrBlank()}, tenant=$tenant)")
-
-                if (!token.isNullOrBlank()) {
-                    if (hasLocPermission()) {
-                        LocationService.start(ctx, token, tenant)
-                    } else {
-                        Log.e("Orbana.Vehicle", "Sin permisos tras startShift(); no inicio FGS")
-                        error = "Permisos de ubicación no concedidos."
-                        return
-                    }
-                } else {
-                    Log.e("Orbana.Vehicle", "NO TOKEN al iniciar LocationService")
+                if (!token.isNullOrBlank() && hasLocPermission()) {
+                    LocationService.start(ctx, token, tenant)
                 }
-
-                Log.d("Orbana.Vehicle", "navigate -> ${Routes.Offers}")
                 nav.navigate(Routes.Offers) {
                     popUpTo(Routes.Vehicle) { inclusive = true }
                     launchSingleTop = true
                 }
             } else {
                 error = "No se pudo abrir el turno."
-                Log.e("Orbana.Vehicle", "startShift() devolvió null")
             }
         } catch (e: Exception) {
             error = e.message ?: "Error abriendo turno"
-            Log.e("Orbana.Vehicle", "Excepción startShiftAndGo()", e)
+            Log.e(TAG, "startShiftAndGo()", e)
         } finally { loading = false }
     }
 
-// ----- LUEGO el launcher de permisos -----
     val requestPermsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { res ->
-        val fine = res[Manifest.permission.ACCESS_FINE_LOCATION] == true
-        val coarse = res[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        val granted = fine || coarse
-        Log.d("Orbana.Vehicle", "Permisos resultado → fine=$fine coarse=$coarse granted=$granted")
-        if (granted) {
-            scope.launch { startShiftAndGo() } // <-- Ahora SÍ existe
-        } else {
-            error = "Se requieren permisos de ubicación para iniciar turno."
-        }
+        val granted = (res[Manifest.permission.ACCESS_FINE_LOCATION] == true) ||
+                (res[Manifest.permission.ACCESS_COARSE_LOCATION] == true)
+        if (granted) scope.launch { startShiftAndGo() }
+        else error = "Se requieren permisos de ubicación para iniciar turno."
     }
 
-    LaunchedEffect(shiftOpen) {
-        if (shiftOpen) {
-            android.util.Log.d("Orbana.Vehicle", "Shift YA abierto → navegar a Offers")
-            // Arranca LocationService si no corre (revisa permisos antes en tu flujo)
-            val token  = app.tokenStore.getToken()
-            val tenant = app.tokenStore.getTenantId()?.toLongOrNull()
-            if (!token.isNullOrBlank() && !com.example.orbanadrive.services.LocationService.isRunning) {
-                com.example.orbanadrive.services.LocationService.start(ctx, token, tenant)
-            }
-
-            nav.navigate(Routes.Offers) {
-                popUpTo(Routes.Vehicle) { inclusive = true }
-                launchSingleTop = true
-            }
-        }
-    }
-
-    // ===== Carga inicial =====
+    // --- Carga inicial y NAVEGACIÓN inmediata si ya hay turno ---
+    var navDone by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         try {
             val m = app.driverRepo.me()
             me = m
-            driverName  = m.driver?.name ?: m.user.name
+            driverName  = m.driver?.name ?: m.user?.name
             driverPhone = m.driver?.phone
-            shiftOpen   = m.current_shift != null
+            shiftOpen   = m.currentShift != null    // <- ya mapea bien con @Json/@SerializedName
 
             val list = app.driverRepo.getVehicles()
             vehicles = list
             if (list.size == 1) selectedId = list.first().id
+
+            if (shiftOpen && !navDone) {
+                // Opcional: arranca FGS si puedes
+                val token  = app.tokenStore.getToken()
+                val tenant = app.tokenStore.getTenantId()?.toLongOrNull()
+                if (!token.isNullOrBlank() && hasLocPermission() && !LocationService.isRunning) {
+                    LocationService.start(ctx, token, tenant)
+                }
+                navDone = true
+                nav.navigate(Routes.Offers) {
+                    popUpTo(Routes.Vehicle) { inclusive = true }
+                    launchSingleTop = true
+                }
+                return@LaunchedEffect
+            }
         } catch (e: Exception) {
             error = e.message ?: "Error cargando datos"
         } finally { loading = false }
     }
 
-    val canStart = selectedId != null && !loading
-
     Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Seleccionar vehículo") }
-            )
-        }
+        topBar = { CenterAlignedTopAppBar(title = { Text("Seleccionar vehículo") }) }
     ) { pad ->
         Column(
             modifier = Modifier
@@ -172,11 +135,8 @@ fun VehicleSelectScreen(nav: NavHostController) {
                 .fillMaxSize()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            // Header con avatar / datos
             Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 shape = MaterialTheme.shapes.extraLarge
             ) {
                 Row(
@@ -184,43 +144,32 @@ fun VehicleSelectScreen(nav: NavHostController) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Image(
-                        painter = painterResource(R.drawable.avatar_default),
+                        painter = painterResource(id = R.drawable.default_user),
                         contentDescription = null,
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(RectangleShape)
+                        modifier = Modifier.size(56.dp).clip(RectangleShape)
                     )
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(
-                            driverName ?: "Conductor",
+                        Text(driverName ?: "Conductor",
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            driverPhone ?: "—",
+                            fontWeight = FontWeight.SemiBold)
+                        Text(driverPhone ?: "—",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
-                        if (shiftOpen) {
-                            AssistChip(onClick = { }, label = { Text("Shift Open") })
-                        } else {
-                            AssistChip(onClick = { }, label = { Text("Offline") })
-                        }
+                            color = MaterialTheme.colorScheme.secondary)
+                        AssistChip(onClick = {}, label = { Text(if (shiftOpen) "Shift Open" else "Offline") })
                     }
                 }
             }
 
             if (loading) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                LinearProgressIndicator(Modifier.fillMaxWidth())
                 Spacer(Modifier.height(12.dp))
             }
-            if (error != null) {
-                Text(error!!, color = MaterialTheme.colorScheme.error)
+            error?.let {
+                Text(it, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(12.dp))
             }
 
-            // Lista de vehículos
             LazyColumn(
                 modifier = Modifier.weight(1f, fill = true),
                 contentPadding = PaddingValues(vertical = 8.dp)
@@ -242,11 +191,9 @@ fun VehicleSelectScreen(nav: NavHostController) {
                             Column(Modifier.weight(1f)) {
                                 Text(v.economico ?: "Vehículo ${v.id}", style = MaterialTheme.typography.titleMedium)
                                 val plate = v.plate?.takeIf { it.isNotBlank() } ?: "—"
-                                Text(
-                                    "${v.brand ?: ""} ${v.model ?: ""} · $plate",
+                                Text("${v.brand ?: ""} ${v.model ?: ""} · $plate",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.secondary
-                                )
+                                    color = MaterialTheme.colorScheme.secondary)
                             }
                             RadioButton(
                                 selected = (selectedId == v.id),
@@ -257,12 +204,12 @@ fun VehicleSelectScreen(nav: NavHostController) {
                 }
             }
 
-            // Botón Iniciar turno (con permisos + logs)
+            val canStart = selectedId != null && !loading
+
             Button(
                 onClick = {
                     if (!canStart) return@Button
                     if (!hasLocPermission()) {
-                        Log.d(TAG, "No hay permisos → solicitando...")
                         requestPermsLauncher.launch(
                             arrayOf(
                                 Manifest.permission.ACCESS_FINE_LOCATION,
@@ -271,21 +218,12 @@ fun VehicleSelectScreen(nav: NavHostController) {
                         )
                         return@Button
                     }
-                    Log.d(TAG, "Permisos OK → iniciar flujo de turno")
                     scope.launch { startShiftAndGo() }
                 },
                 enabled = canStart,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
+                modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = MaterialTheme.shapes.large
-            ) {
-                Text("Iniciar turno")
-            }
+            ) { Text("Iniciar turno") }
         }
     }
 }
-
-/* ---------- Helpers de Modifier (FORMA CORRECTA) ---------- */
-private val Modifier.cardPadding: Modifier
-    get() = this.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)

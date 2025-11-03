@@ -95,7 +95,7 @@ private fun DrawerHeader() {
             .onSuccess { me ->
                 name   = me.driver?.name ?: me.user?.name ?: "Conductor"
                 phone  = me.driver?.phone
-                status = me.driver?.status ?: (me.current_shift?.status ?: "offline")
+                status = me.driver?.status ?: (me.currentShift?.status ?: "offline")
             }
     }
 

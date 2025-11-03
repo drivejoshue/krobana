@@ -17,7 +17,7 @@ class AuthRepository(
 
         // opcional: precargar nombre para la UI
         runCatching { api.me() }.onSuccess { me ->
-            tokenStore.setDriverName(me.user.name ?: me.driver?.name ?: "")
+            tokenStore.setDriverName(me.user?.name ?: me.driver?.name ?: "")
         }
         return true
     }

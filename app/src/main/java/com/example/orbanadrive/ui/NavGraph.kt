@@ -40,11 +40,11 @@ fun AppNavHost() {
 
         val driverId = (
                 (me?.driver?.id as? Number)?.toLong()
-                    ?: (me?.current_shift?.let { it as? Map<*,*> }?.get("driver_id") as? Number)?.toLong()
+                    ?: (me?.currentShift?.let { it as? Map<*,*> }?.get("driver_id") as? Number)?.toLong()
                     ?: 0L
                 )
 
-        val start = if (me?.current_shift != null) Routes.Offers else Routes.Vehicle
+        val start = if (me?.currentShift != null) Routes.Offers else Routes.Vehicle
         value = StartPayload(start, tenantId, driverId)
     }
     if (payload == null) return

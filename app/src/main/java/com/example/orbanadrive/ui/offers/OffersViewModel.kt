@@ -53,7 +53,7 @@ class OffersViewModel(
         if (_allowFareBidding.value != true) return
         viewModelScope.launch {
             runCatching { repo.dispatchSettings() }.onSuccess {
-                _allowFareBidding.value = it.allow_fare_bidding ?: true
+                _allowFareBidding.value = it.allowFareBidding ?: true
             }
         }
     }
